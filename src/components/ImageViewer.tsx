@@ -157,7 +157,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
         >
-          <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="absolute inset-0 flex items-center justify-center">
             <img
               ref={imageRef}
               src={imageUrl}
@@ -168,6 +168,11 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({
                 cursor: zoom > 1 ? (isDragging ? 'grabbing' : 'grab') : 'default'
               }}
               onDoubleClick={handleReset}
+              onLoad={() => console.log('Image loaded successfully:', imageUrl)}
+              onError={(e) => {
+                console.error('Image failed to load:', imageUrl, e);
+                // You could set a fallback image here
+              }}
             />
           </div>
 

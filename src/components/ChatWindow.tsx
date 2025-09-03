@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, User, Bot, ThumbsUp, ThumbsDown, Copy, MoreHorizontal } from 'lucide-react';
+import { Send, User, Bot, ThumbsUp, ThumbsDown, Copy, MoreHorizontal, Sparkles, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
 interface Message {
@@ -38,6 +39,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Auto-scroll to bottom
   useEffect(() => {
     if (scrollAreaRef.current) {
       scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
@@ -72,72 +74,102 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   };
 
   return (
-    <div className={cn('flex flex-col h-full bg-background', className)}>
-      {/* Chat Header */}
-      <div className="flex items-center justify-between p-4 border-b bg-card/50">
-        <div className="flex items-center gap-3">
-          <div className="w-2 h-2 bg-success rounded-full animate-pulse" />
-          <h3 className="font-semibold text-foreground">AI Assistant</h3>
+    <div className="flex flex-col h-full bg-background">
+      {/* Clean Header */}
+      <div className="relative overflow-hidden border-b bg-card/80 backdrop-blur-sm">
+        <div className="relative flex items-center justify-between p-6">
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <div className="w-12 h-12 rounded-2xl bg-card flex items-center justify-center shadow-lg border-2 border-border">
+                <MessageSquare className="w-6 h-6 text-muted-foreground" />
+              </div>
+              <div className="absolute -top-1 -right-1 w-4 h-4 bg-success rounded-full shadow-sm border-2 border-background" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-foreground text-xl">
+                  PictureASKQ AI
+                </h3>
+                <Badge variant="secondary" className="text-xs">
+                  Online
+                </Badge>
+              </div>
+              <p className="text-sm text-muted-foreground font-medium">
+                AI-powered image analysis
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="text-right">
+              <p className="text-xs text-muted-foreground">
+                {messages.length} messages
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Ask anything about your image
+              </p>
+            </div>
+          </div>
         </div>
-        <p className="text-xs text-muted-foreground">
-          Ask questions about your image
-        </p>
       </div>
 
-      {/* Messages */}
-      <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
-        <div className="space-y-6">
+      {/* Clean Messages Area */}
+      <ScrollArea className="flex-1 relative">
+        <div className="relative p-6 space-y-8 min-h-full">
           {messages.length === 0 && (
-            <div className="text-center py-12">
-              <div className="w-16 h-16 mx-auto mb-4 bg-gradient-primary rounded-full flex items-center justify-center">
-                <Bot className="w-8 h-8 text-primary-foreground" />
+            <div className="text-center py-20">
+              <div className="relative mb-8">
+                <div className="w-20 h-20 mx-auto rounded-2xl bg-card flex items-center justify-center shadow-xl border-2 border-border">
+                  <Bot className="w-10 h-10 text-muted-foreground" />
+                </div>
               </div>
-              <h3 className="text-lg font-semibold text-foreground mb-2">
+              <h3 className="text-2xl font-bold text-foreground mb-4">
                 Ready to analyze your image
               </h3>
-              <p className="text-muted-foreground">
-                Ask me anything about the image you've uploaded. I can help identify objects, read text, describe scenes, and more.
+              <p className="text-muted-foreground max-w-lg mx-auto text-lg leading-relaxed mb-6">
+                Ask me anything about the image on PictureASKQ. I can identify objects, read text, describe scenes, and more.
               </p>
+              <div className="flex justify-center gap-3">
+                <Badge variant="outline" className="px-4 py-2">
+                  <Sparkles className="w-4 h-4 mr-2" />
+                  Object Detection
+                </Badge>
+                <Badge variant="outline" className="px-4 py-2">
+                  <MessageSquare className="w-4 h-4 mr-2" />
+                  Text Analysis
+                </Badge>
+              </div>
             </div>
           )}
 
-          {messages.map((message) => (
+          {messages.map((message, index) => (
             <div
               key={message.id}
-              className={cn(
-                'flex gap-3 animate-fade-in',
-                message.type === 'user' ? 'flex-row-reverse' : 'flex-row'
-              )}
+              className={`flex gap-4 items-start ${message.type === 'user' ? 'flex-row-reverse' : 'flex-row'}`}
             >
-              <Avatar className="w-8 h-8 flex-shrink-0">
-                <AvatarFallback className={cn(
-                  'text-xs font-medium',
-                  message.type === 'user' 
-                    ? 'bg-primary text-primary-foreground' 
-                    : 'bg-accent text-accent-foreground'
-                )}>
-                  {message.type === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+              <Avatar className="w-12 h-12 flex-shrink-0 shadow-lg border-2 border-border">
+                <AvatarFallback className={`text-sm font-bold ${message.type === 'user' 
+                  ? 'bg-primary text-primary-foreground' 
+                  : 'bg-accent text-accent-foreground'}`}>
+                  {message.type === 'user' ? <User className="w-5 h-5" /> : <Bot className="w-5 h-5" />}
                 </AvatarFallback>
               </Avatar>
 
-              <div className={cn(
-                'flex flex-col space-y-2 max-w-[80%]',
-                message.type === 'user' ? 'items-end' : 'items-start'
-              )}>
-                <div className={cn(
-                  'px-4 py-3 rounded-2xl shadow-soft',
-                  message.type === 'user'
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-card border'
-                )}>
-                  <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+              <div className={`flex flex-col space-y-3 max-w-[75%] min-w-0 ${message.type === 'user' ? 'items-end' : 'items-start'}`}>
+                <div className={`relative px-6 py-4 rounded-2xl shadow-xl ${message.type === 'user'
+                  ? 'bg-primary text-primary-foreground rounded-br-md'
+                  : 'bg-card text-card-foreground border border-border rounded-bl-md'}`}>
+                  <p className="text-base leading-relaxed whitespace-pre-wrap">
+                    {message.content}
+                  </p>
                 </div>
 
-                <div className="flex items-center gap-2 px-1">
-                <span className="text-xs text-muted-foreground">
-                  {message.created_at ? new Date(message.created_at).toLocaleTimeString() : ''}
-                </span>
-
+                <div className={`flex items-center gap-3 text-xs text-muted-foreground px-2 ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <span className="font-medium">
+                    {message.created_at ? new Date(message.created_at).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    }) : ''}
+                  </span>
 
                   {message.type === 'assistant' && (
                     <div className="flex items-center gap-1">
@@ -145,34 +177,28 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                         variant="ghost"
                         size="sm"
                         onClick={() => onRateMessage(message.id, 'positive')}
-                        className={cn(
-                          'h-6 w-6 p-0',
-                          message.rating === 'positive' && 'text-success bg-success/10'
-                        )}
+                        className={`h-7 w-7 p-0 rounded-full hover:bg-success/10 transition-all duration-200 ${message.rating === 'positive' ? 'bg-success/20 text-success' : ''}`}
                       >
-                        <ThumbsUp className="w-3 h-3" />
+                        <ThumbsUp className="w-3.5 h-3.5" />
                       </Button>
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => onRateMessage(message.id, 'negative')}
-                        className={cn(
-                          'h-6 w-6 p-0',
-                          message.rating === 'negative' && 'text-destructive bg-destructive/10'
-                        )}
+                        className={`h-7 w-7 p-0 rounded-full hover:bg-destructive/10 transition-all duration-200 ${message.rating === 'negative' ? 'bg-destructive/20 text-destructive' : ''}`}
                       >
-                        <ThumbsDown className="w-3 h-3" />
+                        <ThumbsDown className="w-3.5 h-3.5" />
                       </Button>
-                      
+
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
-                            <MoreHorizontal className="w-3 h-3" />
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 rounded-full hover:bg-muted/50 transition-all duration-200">
+                            <MoreHorizontal className="w-3.5 h-3.5" />
                           </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start">
-                          <DropdownMenuItem onClick={() => copyMessage(message.content)}>
-                            <Copy className="w-4 h-4 mr-2" />
+                        <DropdownMenuContent align="start" className="w-40">
+                          <DropdownMenuItem onClick={() => copyMessage(message.content)} className="gap-2">
+                            <Copy className="w-4 h-4" />
                             Copy message
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -184,19 +210,24 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             </div>
           ))}
 
-          {/* Typing Indicator */}
+          {/* Clean Typing Indicator */}
           {isTyping && (
-            <div className="flex gap-3 animate-fade-in">
-              <Avatar className="w-8 h-8">
+            <div className="flex gap-4 items-start">
+              <Avatar className="w-12 h-12 shadow-lg border-2 border-border">
                 <AvatarFallback className="bg-accent text-accent-foreground">
-                  <Bot className="w-4 h-4" />
+                  <Bot className="w-5 h-5" />
                 </AvatarFallback>
               </Avatar>
-              <div className="bg-card border px-4 py-3 rounded-2xl shadow-soft">
-                <div className="flex space-x-1">
-                  <div className="w-2 h-2 bg-muted-foreground rounded-full animate-pulse" />
-                  <div className="w-2 h-2 bg-muted-foreground rounded-full animate-pulse" style={{ animationDelay: '0.2s' }} />
-                  <div className="w-2 h-2 bg-muted-foreground rounded-full animate-pulse" style={{ animationDelay: '0.4s' }} />
+              <div className="bg-card border border-border px-6 py-4 rounded-2xl rounded-bl-md shadow-xl">
+                <div className="flex gap-2 items-center">
+                  <div className="flex gap-1">
+                    <div className="w-2 h-2 bg-muted-foreground rounded-full animate-pulse"></div>
+                    <div className="w-2 h-2 bg-muted-foreground rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+                    <div className="w-2 h-2 bg-muted-foreground rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
+                  </div>
+                  <span className="text-sm text-muted-foreground font-medium ml-2">
+                    PictureASKQ is thinking...
+                  </span>
                 </div>
               </div>
             </div>
@@ -204,34 +235,40 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         </div>
       </ScrollArea>
 
-      {/* Input Area */}
-      <div className="p-4 border-t bg-card/30">
-        <form onSubmit={handleSubmit} className="flex gap-3">
-          <div className="flex-1 relative">
-            <Textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask a question about your image..."
-              className="resize-none min-h-[44px] max-h-32 pr-12"
-              rows={1}
-            />
-            <Button
-              type="submit"
-              variant="ghost"
-              size="sm"
-              disabled={!input.trim() || isSubmitting}
-              className="absolute right-2 top-2 h-8 w-8 p-0"
-            >
-              <Send className="w-4 h-4" />
-            </Button>
-          </div>
-        </form>
-        
-        <p className="text-xs text-muted-foreground mt-2 px-1">
-          Press Enter to send, Shift+Enter for new line
-        </p>
+      {/* Clean Input Area */}
+      <div className="relative overflow-hidden border-t bg-card/80 backdrop-blur-sm">
+        <div className="relative p-6">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="relative">
+              <Textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Ask anything about your image..."
+                className="resize-none min-h-[60px] max-h-40 pr-20 rounded-2xl shadow-xl border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary text-base leading-relaxed"
+                rows={1}
+              />
+              <Button
+                type="submit"
+                disabled={!input.trim() || isSubmitting}
+                className="absolute right-4 bottom-4 h-10 w-10 p-0 rounded-xl shadow-lg bg-primary hover:bg-primary/90 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Send className="w-4 h-4" />
+              </Button>
+            </div>
+
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <p className="font-medium">
+                Press <kbd className="px-2 py-1 bg-muted rounded text-xs">Enter</kbd> to send, <kbd className="px-2 py-1 bg-muted rounded text-xs">Shift+Enter</kbd> for new line
+              </p>
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-success rounded-full"></div>
+                <span>AI Ready</span>
+              </div>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
   );

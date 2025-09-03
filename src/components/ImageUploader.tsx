@@ -53,17 +53,95 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
   const uploadFileToSupabase = async (fileData: ImageFile) => {
     const filePath = `${Date.now()}-${fileData.file.name}`;
     try {
+      console.log('Starting upload process for:', fileData.file.name);
+      
       // Upload to Supabase Storage
       const { data, error } = await supabase.storage
         .from('images')
         .upload(filePath, fileData.file, { cacheControl: '3600', upsert: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Storage upload error:', error);
+        throw error;
+      }
       if (!data?.path) throw new Error('No path returned from upload.');
+
+      console.log('Storage upload successful, path:', data.path);
 
       // Get public URL
       const publicUrlResult = supabase.storage.from('images').getPublicUrl(data.path);
       const publicUrl = publicUrlResult.data.publicUrl;
+      console.log('Public URL generated:', publicUrl);
+
+      // Test database connection first
+      const { data: testData, error: testError } = await supabase
+        .from('images')
+        .select('count')
+        .limit(1);
+
+      if (testError) {
+        console.error('Database connection test failed:', testError);
+        console.log('The images table likely does not exist in your Supabase database.');
+        console.log('Please create the table using the SQL provided below.');
+      } else {
+        console.log('Database connection test passed');
+      }
+
+      // Save to database
+      console.log('Attempting to save to database...');
+      console.log('Data to insert:', {
+        filename: fileData.file.name,
+        supabase_path: data.path,
+        public_url: publicUrl,
+        file_size: `${(fileData.file.size / (1024 * 1024)).toFixed(2)} MB`,
+        uploaded_at: new Date().toISOString(),
+        status: 'completed',
+        message_count: 0,
+        tags: [],
+        ocr_text: '',
+        detected_objects: [],
+      });
+
+      const { data: dbData, error: dbError } = await supabase
+        .from('images')
+        .insert([
+          {
+            filename: fileData.file.name,
+            supabase_path: data.path,
+            public_url: publicUrl,
+            file_size: `${(fileData.file.size / (1024 * 1024)).toFixed(2)} MB`,
+            uploaded_at: new Date().toISOString(),
+            status: 'completed',
+            message_count: 0,
+            tags: [],
+            ocr_text: '',
+            detected_objects: [],
+          }
+        ])
+        .select()
+        .single();
+
+      if (dbError) {
+        console.error('❌ Database INSERT failed!');
+        console.error('Error message:', dbError.message);
+        console.error('Error code:', dbError.code);
+        console.error('Error details:', dbError.details);
+        console.error('Error hint:', dbError.hint);
+        
+        // Provide specific guidance based on error type
+        if (dbError.message.includes('permission denied')) {
+          console.error('🚫 SOLUTION: Check your RLS policies in Supabase dashboard');
+          console.error('Go to: Authentication > Policies > Create policy for images table');
+        } else if (dbError.message.includes('column')) {
+          console.error('📊 SOLUTION: Check your table columns match the insert data');
+        } else if (dbError.message.includes('duplicate key')) {
+          console.error('🔑 SOLUTION: Check for unique constraint violations');
+        }
+        
+        throw new Error(`Database save failed: ${dbError.message}`);
+      }
+
+      console.log('✅ Database save successful:', dbData);
 
       setFiles((prev) =>
         prev.map((f) =>
@@ -73,15 +151,16 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
         )
       );
 
-      // Call onUploadComplete callback
+      // Call onUploadComplete callback with database ID
       onUploadComplete?.({
-        id: fileData.id,
+        id: dbData.id.toString(),
         url: publicUrl,
         filename: fileData.file.name,
         supabasePath: data.path,
       });
     } catch (err: any) {
       console.error('Error uploading file to Supabase:', err.message);
+      console.error('Error stack:', err.stack);
       setFiles((prev) =>
         prev.map((f) => (f.id === fileData.id ? { ...f, status: 'error' } : f))
       );

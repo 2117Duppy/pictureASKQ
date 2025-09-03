@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, Filter, Grid3x3, LayoutList, MessageSquare, Calendar, Upload, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/lib/supabaseClient';
 
 interface GalleryImage {
   id: string;
@@ -25,70 +26,48 @@ const Gallery: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('newest');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [images, setImages] = useState<GalleryImage[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Mock data
-  const [images] = useState<GalleryImage[]>([
-    {
-      id: '1',
-      filename: 'product-mockup.jpg',
-      url: '/placeholder.svg',
-      uploadedAt: new Date('2024-01-20T10:30:00'),
-      messageCount: 12,
-      status: 'completed',
-      tags: ['product', 'design'],
-      size: '2.4 MB'
-    },
-    {
-      id: '2',
-      filename: 'architecture-plan.pdf',
-      url: '/placeholder.svg',
-      uploadedAt: new Date('2024-01-19T15:45:00'),
-      messageCount: 8,
-      status: 'completed',
-      tags: ['architecture', 'blueprint'],
-      size: '5.1 MB'
-    },
-    {
-      id: '3',
-      filename: 'data-visualization.png',
-      url: '/placeholder.svg',
-      uploadedAt: new Date('2024-01-19T09:15:00'),
-      messageCount: 5,
-      status: 'processing',
-      tags: ['data', 'chart'],
-      size: '1.8 MB'
-    },
-    {
-      id: '4',
-      filename: 'ui-screenshot.png',
-      url: '/placeholder.svg',
-      uploadedAt: new Date('2024-01-18T14:20:00'),
-      messageCount: 15,
-      status: 'completed',
-      tags: ['ui', 'interface'],
-      size: '3.2 MB'
-    },
-    {
-      id: '5',
-      filename: 'invoice-scan.jpg',
-      url: '/placeholder.svg',
-      uploadedAt: new Date('2024-01-17T11:10:00'),
-      messageCount: 3,
-      status: 'completed',
-      tags: ['document', 'ocr'],
-      size: '1.1 MB'
-    },
-    {
-      id: '6',
-      filename: 'logo-design.svg',
-      url: '/placeholder.svg',
-      uploadedAt: new Date('2024-01-16T16:30:00'),
-      messageCount: 7,
-      status: 'failed',
-      tags: ['logo', 'branding'],
-      size: '0.8 MB'
-    }
-  ]);
+  // Fetch images from database
+  useEffect(() => {
+    const fetchImages = async () => {
+      try {
+        setLoading(true);
+        const { data, error } = await supabase
+          .from('images')
+          .select('*')
+          .order('uploaded_at', { ascending: false });
+
+        if (error) {
+          console.error('Error fetching images:', error);
+          return;
+        }
+
+        if (data) {
+          const galleryImages: GalleryImage[] = data.map(img => ({
+            id: img.supabase_path,
+            filename: img.filename,
+            url: img.public_url,
+            uploadedAt: new Date(img.uploaded_at),
+            messageCount: img.message_count || 0,
+            status: img.status || 'completed',
+            tags: img.tags || [],
+            size: img.file_size || 'Unknown',
+            ocr: img.ocr_text,
+            objects: img.detected_objects,
+          }));
+          setImages(galleryImages);
+        }
+      } catch (error) {
+        console.error('Error fetching images:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchImages();
+  }, []);
 
   const filteredImages = images.filter(image => {
     const matchesSearch = image.filename.toLowerCase().includes(searchQuery.toLowerCase()) ||

@@ -6,6 +6,7 @@ import { ImageViewer } from '@/components/ImageViewer';
 import { ChatWindow } from '@/components/ChatWindow';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabaseClient';
+import { useToast } from '@/hooks/use-toast';
 
 interface Message {
   id: string;
@@ -41,6 +42,7 @@ const ChatPage: React.FC = () => {
   const [isTyping, setIsTyping] = useState(false);
   const [image, setImage] = useState<ImageData | null>(null);
   const [isLoadingImage, setIsLoadingImage] = useState(true);
+  const { toast } = useToast();
 
   useEffect(() => {
     const loadChatSession = async () => {
@@ -50,7 +52,7 @@ const ChatPage: React.FC = () => {
       }
 
       setIsLoadingImage(true);
-      const decodedImageId = decodeURIComponent(imageId);
+      const decodedImageId = decodeURIComponent(imageId); // This is now the actual Supabase path
 
       try {
         const { data: publicUrlData } = supabase.storage
@@ -59,6 +61,25 @@ const ChatPage: React.FC = () => {
 
         if (!publicUrlData?.publicUrl) throw new Error('Could not get public URL for image');
         const imageUrl = publicUrlData.publicUrl;
+        
+        console.log('Image URL retrieved:', imageUrl); // Debug log
+
+        // Validate the image URL before sending to n8n
+        const urlTest = new URL(imageUrl);
+        if (!urlTest.protocol.startsWith('http')) {
+          throw new Error('Invalid image URL protocol');
+        }
+        console.log('Image URL validation passed:', imageUrl);
+
+        // Test if image is accessible
+        try {
+          const imageResponse = await fetch(imageUrl, { method: 'HEAD' });
+          if (!imageResponse.ok) {
+            console.warn('Image URL returned but may not be accessible:', imageResponse.status);
+          }
+        } catch (fetchError) {
+          console.warn('Could not verify image accessibility:', fetchError);
+        }
 
         // Trigger n8n image analysis
         let ocrResult = '';
@@ -66,13 +87,16 @@ const ChatPage: React.FC = () => {
 
         if (N8N_IMAGE_ANALYSIS_WEBHOOK_URL) {
           try {
+            const encodedImageUrl = encodeURI(imageUrl); // Ensure proper encoding
+            console.log('Sending encoded imageUrl to n8n:', encodedImageUrl);
             const analysisResponse = await fetch(N8N_IMAGE_ANALYSIS_WEBHOOK_URL, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ imageUrl }),
+              body: JSON.stringify({ imageUrl: encodedImageUrl }),
             });
             if (!analysisResponse.ok) throw new Error(`Image analysis HTTP error: ${analysisResponse.status}`);
             const analysisData = await analysisResponse.json();
+            console.log('Image analysis result:', analysisData); // Debug log
             ocrResult = analysisData.ocr || '';
             objectDetectionResults = analysisData.objects || [];
           } catch (err) {
@@ -133,7 +157,7 @@ const ChatPage: React.FC = () => {
   const handleSendMessage = async (content: string) => {
     if (!imageId || !image) return;
 
-    const decodedImageId = decodeURIComponent(imageId);
+    const decodedImageId = decodeURIComponent(imageId); // Use decoded Supabase path
     const userMessage: Message = {
       id: Date.now().toString(),
       chat_id: decodedImageId,
@@ -146,17 +170,6 @@ const ChatPage: React.FC = () => {
     setIsTyping(true);
 
     // Insert user message
-    const { error: userInsertError } = await supabase.from('messages').insert([
-      {
-        id: userMessage.id,
-        chat_id: userMessage.chat_id,
-        type: userMessage.type,
-        content: userMessage.content,
-        created_at: userMessage.created_at,
-      }
-    ]);
-    if (userInsertError) console.error('Error inserting user message:', userInsertError);
-
     try {
       if (!N8N_CHAT_WEBHOOK_URL) throw new Error('VITE_N8N_CHAT_WEBHOOK_URL is not set.');
 
@@ -175,12 +188,42 @@ const ChatPage: React.FC = () => {
 
       if (!response.ok) throw new Error(`Chat webhook HTTP error: ${response.status}`);
 
-      const data = await response.json();
+      // Handle both JSON and plain text responses
+      let aiResponse = '';
+      
+      try {
+        const data = await response.json();
+        console.log('Raw n8n response:', data); // Debug log
+        
+        // Try different possible response structures
+        if (typeof data === 'string') {
+          aiResponse = data;
+        } else if (data.aiResponse || data.response || data.message || data.text) {
+          aiResponse = data.aiResponse || data.response || data.message || data.text;
+        } else if (data.data && typeof data.data === 'string') {
+          aiResponse = data.data;
+        } else {
+          // If it's an object, try to extract meaningful content
+          aiResponse = JSON.stringify(data, null, 2);
+        }
+      } catch (parseError) {
+        // If JSON parsing fails, try to get as text
+        console.warn('JSON parsing failed, trying text response:', parseError);
+        const textResponse = await response.text();
+        aiResponse = textResponse;
+        console.log('Text response:', textResponse);
+      }
+
+      // Ensure we have a valid response
+      if (!aiResponse || aiResponse.trim() === '') {
+        aiResponse = "I received your message but couldn't generate a response. Please try again.";
+      }
+
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
         chat_id: decodedImageId,
         type: 'assistant',
-        content: data.aiResponse || "I'm sorry, I couldn't get a response from the AI.",
+        content: aiResponse.trim(),
         created_at: new Date().toISOString(),
       };
 
@@ -211,7 +254,6 @@ const ChatPage: React.FC = () => {
       setIsTyping(false);
     }
   };
-
   const handleRateMessage = (messageId: string, rating: 'positive' | 'negative') => {
     setMessages(prev => prev.map(msg => (msg.id === messageId ? { ...msg, rating } : msg)));
     supabase.from('messages').update({ rating }).eq('id', messageId).then(({ error }) => {
@@ -219,7 +261,55 @@ const ChatPage: React.FC = () => {
     });
   };
 
-  const handleExport = () => console.log('Exporting conversation...');
+  const handleExport = () => {
+    const exportData = {
+      image: {
+        filename: image.filename,
+        url: image.url,
+        uploadedAt: new Date().toISOString(),
+        ocr: image.ocr,
+        objects: image.objects,
+      },
+      conversation: messages.map(msg => ({
+        id: msg.id,
+        type: msg.type,
+        content: msg.content,
+        timestamp: msg.created_at,
+        rating: msg.rating,
+      })),
+      exportedAt: new Date().toISOString(),
+      platform: 'PictureASKQ',
+    };
+
+    const dataStr = JSON.stringify(exportData, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `conversation-${image.filename.replace(/\.[^/.]+$/, '')}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleShare = () => {
+    const shareUrl = `${window.location.origin}/chat/${encodeURIComponent(imageId)}`;
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      toast({
+        title: "Link copied!",
+        description: "Conversation link has been copied to your clipboard.",
+      });
+    }).catch(err => {
+      console.error('Failed to copy link:', err);
+      toast({
+        title: "Failed to copy",
+        description: "Could not copy link to clipboard.",
+        variant: "destructive",
+      });
+    });
+  };
 
   if (isLoadingImage) {
     return (
@@ -262,7 +352,7 @@ const ChatPage: React.FC = () => {
             <Download className="w-4 h-4 mr-2" />
             Export
           </Button>
-          <Button variant="ghost" size="sm">
+          <Button variant="ghost" size="sm" onClick={handleShare}>
             <Share2 className="w-4 h-4 mr-2" />
             Share
           </Button>
