@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Grid3x3, LayoutList, MessageSquare, Calendar, Upload, ArrowLeft } from 'lucide-react';
+import { Search, Filter, Grid3x3, LayoutList, MessageSquare, Calendar, Upload, ArrowLeft, Trash2, Heart } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -8,6 +8,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabaseClient';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { useToast } from '@/hooks/use-toast';
 
 interface GalleryImage {
   id: string;
@@ -18,6 +20,7 @@ interface GalleryImage {
   status: 'completed' | 'processing' | 'failed';
   tags: string[];
   size: string;
+  isFavorited?: boolean; // Added for favorite functionality
 }
 
 const Gallery: React.FC = () => {
@@ -28,6 +31,9 @@ const Gallery: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState('all');
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deleteImageId, setDeleteImageId] = useState<string | null>(null);
+  const [deleteImageName, setDeleteImageName] = useState<string>('');
+  const { toast } = useToast();
 
   // Fetch images from database
   useEffect(() => {
@@ -56,6 +62,7 @@ const Gallery: React.FC = () => {
             size: img.file_size || 'Unknown',
             ocr: img.ocr_text,
             objects: img.detected_objects,
+            isFavorited: img.is_favorited, // Assuming is_favorited is stored in the database
           }));
           setImages(galleryImages);
         }
@@ -93,6 +100,67 @@ const Gallery: React.FC = () => {
 
   const handleImageClick = (imageId: string) => {
     navigate(`/chat/${imageId}`);
+  };
+
+  const handleDeleteImage = async (imageId: string) => {
+    try {
+      // Delete from Supabase Storage
+      await supabase.storage.from('images').remove([imageId]);
+      
+      // Delete from database
+      await supabase.from('images').delete().eq('supabase_path', imageId);
+      
+      // Delete associated messages
+      await supabase.from('messages').delete().eq('chat_id', imageId);
+      
+      // Remove from UI
+      setImages(prev => prev.filter(img => img.id !== imageId));
+      
+      toast({
+        title: "Image deleted",
+        description: "Image and all associated data have been removed.",
+      });
+    } catch (error) {
+      console.error('Delete error:', error);
+      toast({
+        title: "Delete failed",
+        description: "Could not delete the image. Please try again.",
+        variant: "destructive",
+      });
+    }
+    setDeleteImageId(null);
+    setDeleteImageName('');
+  };
+
+  const handleToggleFavorite = async (imageId: string, currentlyFavorited: boolean) => {
+    try {
+      // Update database
+      await supabase
+        .from('images')
+        .update({ is_favorited: !currentlyFavorited })
+        .eq('supabase_path', imageId);
+      
+      // Update UI
+      setImages(prev => prev.map(img => 
+        img.id === imageId 
+          ? { ...img, isFavorited: !currentlyFavorited }
+          : img
+      ));
+      
+      toast({
+        title: currentlyFavorited ? "Removed from favorites" : "Added to favorites",
+        description: currentlyFavorited 
+          ? "Image removed from your favorites." 
+          : "Image added to your favorites.",
+      });
+    } catch (error) {
+      console.error('Favorite toggle error:', error);
+      toast({
+        title: "Update failed",
+        description: "Could not update favorite status. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
@@ -228,6 +296,32 @@ const Gallery: React.FC = () => {
                       {image.messageCount}
                     </div>
                   )}
+                  {/* Favorite Button - Top Left */}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleFavorite(image.id, image.isFavorited || false);
+                    }}
+                    className="absolute top-3 left-3 opacity-0 group-hover:opacity-100 transition-all duration-200 bg-yellow-500/90 hover:bg-yellow-600 text-white rounded-full p-2"
+                  >
+                    <Heart className={`w-4 h-4 ${image.isFavorited ? 'fill-current' : ''}`} />
+                  </Button>
+
+                  {/* Delete Button - Top Right */}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteImageId(image.id);
+                      setDeleteImageName(image.filename);
+                    }}
+                    className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-all duration-200 bg-red-500/90 hover:bg-red-600 text-white rounded-full p-2"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
                 </div>
                 <CardContent className="p-4">
                   <h3 className="font-medium text-foreground truncate mb-2">
@@ -301,9 +395,44 @@ const Gallery: React.FC = () => {
                       </div>
                     </div>
                     
-                    <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100 transition-opacity">
-                      <MessageSquare className="w-4 h-4" />
-                    </Button>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleImageClick(image.id);
+                        }}
+                        className="bg-blue-500/90 hover:bg-blue-600 text-white"
+                      >
+                        <MessageSquare className="w-4 h-4" />
+                      </Button>
+                      
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleToggleFavorite(image.id, image.isFavorited || false);
+                        }}
+                        className="bg-yellow-500/90 hover:bg-yellow-600 text-white"
+                      >
+                        <Heart className={`w-4 h-4 ${image.isFavorited ? 'fill-current' : ''}`} />
+                      </Button>
+                      
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteImageId(image.id);
+                          setDeleteImageName(image.filename);
+                        }}
+                        className="bg-red-500/90 hover:bg-red-600 text-white"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -329,6 +458,26 @@ const Gallery: React.FC = () => {
           </div>
         )}
       </div>
+
+      <AlertDialog open={!!deleteImageId} onOpenChange={() => setDeleteImageId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Image</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{deleteImageName}"? This action cannot be undone and will also delete all associated chat messages.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={() => deleteImageId && handleDeleteImage(deleteImageId)}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

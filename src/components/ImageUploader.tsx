@@ -70,8 +70,31 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
 
       // Get public URL
       const publicUrlResult = supabase.storage.from('images').getPublicUrl(data.path);
-      const publicUrl = publicUrlResult.data.publicUrl;
-      console.log('Public URL generated:', publicUrl);
+      let publicUrl = publicUrlResult.data.publicUrl;
+      console.log('📤 Generated public URL:', publicUrl);
+
+      // Validate the URL format
+      const expectedUrlFormat = /^https:\/\/uhtbtbenblexmyvjegca\.supabase\.co\/storage\/v1\/object\/public\/images\/.*\.(jpg|jpeg|png|gif|webp|pdf)$/i;
+      if (!expectedUrlFormat.test(publicUrl)) {
+        console.error('❌ Invalid URL format generated!');
+        console.error('Generated URL:', publicUrl);
+        console.error('Expected format: https://uhtbtbenblexmyvjegca.supabase.co/storage/v1/object/public/images/filename.ext');
+        
+        // Fallback: construct URL manually
+        const supabaseUrl = "https://uhtbtbenblexmyvjegca.supabase.co";
+        const bucket = 'images';
+        const fallbackUrl = `${supabaseUrl}/storage/v1/object/public/${bucket}/${data.path}`;
+        console.log('🔧 Using fallback URL:', fallbackUrl);
+        
+        if (expectedUrlFormat.test(fallbackUrl)) {
+          console.log('✅ Fallback URL is valid');
+          publicUrl = fallbackUrl;
+        } else {
+          console.error('❌ Fallback URL is also invalid');
+        }
+      } else {
+        console.log('✅ Generated URL format is correct');
+      }
 
       // Test database connection first
       const { data: testData, error: testError } = await supabase

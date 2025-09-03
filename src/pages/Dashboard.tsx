@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Plus, MessageSquare, Image as ImageIcon, TrendingUp, Clock, Star, Upload, Zap, BarChart3 } from 'lucide-react';
+import { Plus, MessageSquare, Image as ImageIcon, TrendingUp, Clock, Star, Upload, Zap, BarChart3, Share2, Settings, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ImageUploader } from '@/components/ImageUploader';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
+import { useEffect } from 'react';
 
 interface RecentImage {
   id: string;
@@ -32,14 +33,25 @@ const Dashboard: React.FC = () => {
   };
 
   const handleUploadComplete = (imageData: any) => {
-    // Navigate to chat page using the actual Supabase storage path
-    navigate(`/chat/${encodeURIComponent(imageData.supabasePath)}`);
+    // Navigate to chat page using the full public URL
+    navigate(`/chat/${encodeURIComponent(imageData.url)}`);
   };
 
   const handleImageClick = (imageId: string) => {
-    // Assuming imageId here is already the supabasePath
+    // For existing images, we need to get the full URL from database
+    // For now, assume imageId is the full URL or we need to fetch it
     navigate(`/chat/${encodeURIComponent(imageId)}`);
   };
+
+  // Simple n8n test
+  useEffect(() => {
+    if (import.meta.env.VITE_N8N_CHAT_WEBHOOK_URL) {
+      console.log('✅ n8n webhook URL found:', import.meta.env.VITE_N8N_CHAT_WEBHOOK_URL);
+    } else {
+      console.error('❌ n8n webhook URL not found. Please check your .env file.');
+      console.error('Expected: VITE_N8N_CHAT_WEBHOOK_URL=your-webhook-url');
+    }
+  }, []);
 
   return (
     <div className="min-h-screen bg-background">
@@ -256,6 +268,74 @@ const Dashboard: React.FC = () => {
                   <Star className="w-4 h-4 mr-3" />
                   View Profile
                 </Button>
+              </CardContent>
+            </Card>
+
+            {/* Environment Variables Debug */}
+            <Card className="shadow-xl border-0 bg-card">
+              <CardHeader className="pb-4">
+                <CardTitle className="flex items-center gap-3 text-xl">
+                  <div className="p-2 rounded-lg bg-purple-500/10">
+                    <Settings className="w-6 h-6 text-purple-500" />
+                  </div>
+                  Environment Variables Debug
+                </CardTitle>
+                <CardDescription className="text-base text-muted-foreground">
+                  Check if your .env file is being loaded correctly
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <div className="space-y-3">
+                  <div className="p-4 bg-muted/50 rounded-lg">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-medium">VITE_N8N_CHAT_WEBHOOK_URL:</span>
+                      <span className={`text-sm px-2 py-1 rounded ${import.meta.env.VITE_N8N_CHAT_WEBHOOK_URL ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                        {import.meta.env.VITE_N8N_CHAT_WEBHOOK_URL ? '✅ Set' : '❌ Not set'}
+                      </span>
+                    </div>
+                    <code className="text-xs text-muted-foreground block">
+                      {import.meta.env.VITE_N8N_CHAT_WEBHOOK_URL || 'undefined'}
+                    </code>
+                  </div>
+
+                  <div className="p-4 bg-muted/50 rounded-lg">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-medium">VITE_N8N_IMAGE_ANALYSIS_WEBHOOK_URL:</span>
+                      <span className={`text-sm px-2 py-1 rounded ${import.meta.env.VITE_N8N_IMAGE_ANALYSIS_WEBHOOK_URL ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
+                        {import.meta.env.VITE_N8N_IMAGE_ANALYSIS_WEBHOOK_URL ? '✅ Set' : 'ℹ️ Not set (optional)'}
+                      </span>
+                    </div>
+                    <code className="text-xs text-muted-foreground block">
+                      {import.meta.env.VITE_N8N_IMAGE_ANALYSIS_WEBHOOK_URL || 'undefined'}
+                    </code>
+                  </div>
+
+                  <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <h4 className="font-medium text-blue-800 mb-2">📋 .env File Format:</h4>
+                    <pre className="text-xs text-blue-700 whitespace-pre-wrap">
+{`# Create this in your project root
+VITE_N8N_CHAT_WEBHOOK_URL=https://your-n8n-instance.com/webhook/your-webhook-id
+VITE_N8N_IMAGE_ANALYSIS_WEBHOOK_URL=https://your-n8n-instance.com/webhook/image-analysis-id`}
+                    </pre>
+                  </div>
+
+                  <div className="mt-4 flex gap-2">
+                    <Button 
+                      size="sm" 
+                      onClick={() => window.location.reload()}
+                      className="bg-primary hover:bg-primary/90"
+                    >
+                      Refresh Page
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      onClick={() => console.log('All env vars:', import.meta.env)}
+                    >
+                      Log All Env Vars
+                    </Button>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </div>

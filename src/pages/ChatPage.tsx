@@ -1,12 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Download, Share2, Settings } from 'lucide-react';
+import { ArrowLeft, Download, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ImageViewer } from '@/components/ImageViewer';
 import { ChatWindow } from '@/components/ChatWindow';
-import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabaseClient';
 import { useToast } from '@/hooks/use-toast';
+import { Card } from '@/components/ui/card';
 
 interface Message {
   id: string;
@@ -31,7 +31,6 @@ interface ImageData {
   }>;
 }
 
-// Environment variables
 const N8N_CHAT_WEBHOOK_URL = import.meta.env.VITE_N8N_CHAT_WEBHOOK_URL;
 const N8N_IMAGE_ANALYSIS_WEBHOOK_URL = import.meta.env.VITE_N8N_IMAGE_ANALYSIS_WEBHOOK_URL;
 
@@ -44,120 +43,105 @@ const ChatPage: React.FC = () => {
   const [isLoadingImage, setIsLoadingImage] = useState(true);
   const { toast } = useToast();
 
+  // Memoize decoded imageId to avoid multiple decodeURIComponent calls
+  const decodedImageId = useMemo(() => {
+    return imageId ? decodeURIComponent(imageId) : '';
+  }, [imageId]);
+
+  // Memoized image URL construction - only recalculates when decodedImageId changes
+  const imageUrl = useMemo(() => {
+    if (!decodedImageId) return '';
+    
+    // Use direct URL if already complete
+    if (decodedImageId.startsWith('https://') && decodedImageId.includes('supabase.co')) {
+      return decodedImageId;
+    }
+    
+    // Generate URL from Supabase
+    return supabase.storage.from('images').getPublicUrl(decodedImageId).data.publicUrl || '';
+  }, [decodedImageId]);
+
+  // FIX: Single dependency to prevent infinite loops
   useEffect(() => {
-    const loadChatSession = async () => {
-      if (!imageId) {
-        setIsLoadingImage(false);
-        return;
-      }
+    if (!decodedImageId) {
+      setIsLoadingImage(false);
+      return;
+    }
 
-      setIsLoadingImage(true);
-      const decodedImageId = decodeURIComponent(imageId); // This is now the actual Supabase path
-
+    const loadSession = async () => {
       try {
-        const { data: publicUrlData } = supabase.storage
-          .from('images')
-          .getPublicUrl(decodedImageId);
+        setIsLoadingImage(true);
 
-        if (!publicUrlData?.publicUrl) throw new Error('Could not get public URL for image');
-        const imageUrl = publicUrlData.publicUrl;
-        
-        console.log('Image URL retrieved:', imageUrl); // Debug log
+        // Parallel loading for better performance
+        const [messagesResult] = await Promise.all([
+          supabase
+            .from('messages')
+            .select('*')
+            .eq('chat_id', decodedImageId)
+            .order('created_at', { ascending: true })
+        ]);
 
-        // Validate the image URL before sending to n8n
-        const urlTest = new URL(imageUrl);
-        if (!urlTest.protocol.startsWith('http')) {
-          throw new Error('Invalid image URL protocol');
-        }
-        console.log('Image URL validation passed:', imageUrl);
-
-        // Test if image is accessible
-        try {
-          const imageResponse = await fetch(imageUrl, { method: 'HEAD' });
-          if (!imageResponse.ok) {
-            console.warn('Image URL returned but may not be accessible:', imageResponse.status);
-          }
-        } catch (fetchError) {
-          console.warn('Could not verify image accessibility:', fetchError);
+        // Handle messages
+        if (messagesResult.data) {
+          setMessages(messagesResult.data);
         }
 
-        // Trigger n8n image analysis
-        let ocrResult = '';
-        let objectDetectionResults: Array<{ label: string; confidence: number; bbox?: [number, number, number, number] }> = [];
-
-        if (N8N_IMAGE_ANALYSIS_WEBHOOK_URL) {
-          try {
-            const encodedImageUrl = encodeURI(imageUrl); // Ensure proper encoding
-            console.log('Sending encoded imageUrl to n8n:', encodedImageUrl);
-            const analysisResponse = await fetch(N8N_IMAGE_ANALYSIS_WEBHOOK_URL, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ imageUrl: encodedImageUrl }),
-            });
-            if (!analysisResponse.ok) throw new Error(`Image analysis HTTP error: ${analysisResponse.status}`);
-            const analysisData = await analysisResponse.json();
-            console.log('Image analysis result:', analysisData); // Debug log
-            ocrResult = analysisData.ocr || '';
-            objectDetectionResults = analysisData.objects || [];
-          } catch (err) {
-            console.error('Error calling image analysis webhook:', err);
-          }
-        }
-
-        // Set image state
+        // Set basic image data immediately - use imageUrl only after it's computed
+        const finalImageUrl = decodedImageId.startsWith('https://') ? decodedImageId : 
+          supabase.storage.from('images').getPublicUrl(decodedImageId).data.publicUrl || '';
+          
+        const filename = decodedImageId.split('/').pop() || 'unknown-image';
         setImage({
           id: decodedImageId,
-          url: imageUrl,
-          filename: decodedImageId.split('/').pop() || 'unknown-image',
-          ocr: ocrResult,
-          objects: objectDetectionResults,
+          url: finalImageUrl,
+          filename,
+          ocr: '',
+          objects: [],
         });
 
-        // Fetch messages
-        const { data: messagesData, error: messagesError } = await supabase
-          .from('messages')
-          .select('*')
-          .eq('chat_id', decodedImageId)
-          .order('created_at', { ascending: true });
-
-        if (messagesError) console.error('Error fetching messages:', messagesError);
-        else if (messagesData) {
-          const loadedMessages: Message[] = messagesData.map(msg => ({
-            id: msg.id,
-            chat_id: msg.chat_id,
-            type: msg.type,
-            content: msg.content,
-            created_at: msg.created_at,
-            rating: msg.rating,
-          }));
-          setMessages(loadedMessages);
-
-          if (loadedMessages.length === 0) {
-            const initialAiMessage: Message = {
-              id: `ai-initial-${Date.now()}`,
-              chat_id: decodedImageId,
-              type: 'assistant',
-              content: 'I\'ve analyzed your image. What would you like to know about it?',
-              created_at: new Date().toISOString(),
-            };
-            setMessages([initialAiMessage]);
-            await supabase.from('messages').insert([initialAiMessage]);
-          }
+        // Load analysis asynchronously (non-blocking)
+        if (N8N_IMAGE_ANALYSIS_WEBHOOK_URL) {
+          fetch(N8N_IMAGE_ANALYSIS_WEBHOOK_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageUrl: finalImageUrl }),
+          })
+            .then(response => response.ok ? response.text() : null)
+            .then(text => {
+              if (!text) return;
+              
+              try {
+                const data = JSON.parse(text);
+                setImage(prev => prev ? {
+                  ...prev,
+                  ocr: data.ocr || '',
+                  objects: Array.isArray(data.objects) ? data.objects : [],
+                } : null);
+              } catch {
+                // Silently handle parsing errors
+              }
+            })
+            .catch(() => {
+              // Silently handle network errors
+            });
         }
-      } catch (err: any) {
-        console.error('Error loading chat session or image:', err.message);
-      } finally {
+
+        // FIXED: Set loading to false after successful data loading
+        setIsLoadingImage(false);
+
+      } catch (error) {
+        console.error('Session load error:', error);
         setIsLoadingImage(false);
       }
     };
 
-    loadChatSession();
-  }, [imageId]);
+    loadSession();
+  }, [decodedImageId]); // FIXED: Single dependency to prevent infinite loops
 
-  const handleSendMessage = async (content: string) => {
-    if (!imageId || !image) return;
+  // Optimized message sending
+  const handleSendMessage = useCallback(async (content: string) => {
+    if (!image || !N8N_CHAT_WEBHOOK_URL) return;
 
-    const decodedImageId = decodeURIComponent(imageId); // Use decoded Supabase path
     const userMessage: Message = {
       id: Date.now().toString(),
       chat_id: decodedImageId,
@@ -166,57 +150,86 @@ const ChatPage: React.FC = () => {
       created_at: new Date().toISOString(),
     };
 
+    // Optimistic UI update
     setMessages(prev => [...prev, userMessage]);
     setIsTyping(true);
 
-    // Insert user message
     try {
-      if (!N8N_CHAT_WEBHOOK_URL) throw new Error('VITE_N8N_CHAT_WEBHOOK_URL is not set.');
+      // Parallel operations for better performance
+      const [userInsert, n8nResponse] = await Promise.all([
+        supabase.from('messages').insert([{
+          id: userMessage.id,
+          chat_id: userMessage.chat_id,
+          type: userMessage.type,
+          content: userMessage.content,
+          created_at: userMessage.created_at,
+          rating: null
+        }]),
+        fetch(N8N_CHAT_WEBHOOK_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: content,
+            imageId: decodedImageId,
+            imageUrl: image.url,
+            ocrText: image.ocr || '',
+            detectedObjects: Array.isArray(image.objects) ? image.objects : [],
+            chatHistory: messages.map(msg => ({ type: msg.type, content: msg.content })),
+            sessionId: decodedImageId,
+            timestamp: new Date().toISOString(),
+          }),
+        })
+      ]);
 
-      const response = await fetch(N8N_CHAT_WEBHOOK_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: content,
-          imageId,
-          imageUrl: image.url,
-          ocrText: image.ocr,
-          detectedObjects: image.objects,
-          chatHistory: messages.map(msg => ({ type: msg.type, content: msg.content })),
-        }),
-      });
-
-      if (!response.ok) throw new Error(`Chat webhook HTTP error: ${response.status}`);
-
-      // Handle both JSON and plain text responses
-      let aiResponse = '';
-      
-      try {
-        const data = await response.json();
-        console.log('Raw n8n response:', data); // Debug log
-        
-        // Try different possible response structures
-        if (typeof data === 'string') {
-          aiResponse = data;
-        } else if (data.aiResponse || data.response || data.message || data.text) {
-          aiResponse = data.aiResponse || data.response || data.message || data.text;
-        } else if (data.data && typeof data.data === 'string') {
-          aiResponse = data.data;
-        } else {
-          // If it's an object, try to extract meaningful content
-          aiResponse = JSON.stringify(data, null, 2);
-        }
-      } catch (parseError) {
-        // If JSON parsing fails, try to get as text
-        console.warn('JSON parsing failed, trying text response:', parseError);
-        const textResponse = await response.text();
-        aiResponse = textResponse;
-        console.log('Text response:', textResponse);
+      if (!n8nResponse.ok) {
+        throw new Error(`n8n error: ${n8nResponse.status}`);
       }
 
-      // Ensure we have a valid response
-      if (!aiResponse || aiResponse.trim() === '') {
+      // Parse AI response with comprehensive key support
+      const responseText = await n8nResponse.text();
+      let aiResponse = '';
+      let parsedData = null;
+
+      console.log('🔍 Raw n8n response:', responseText);
+
+      try {
+        parsedData = JSON.parse(responseText);
+        console.log('📦 Parsed n8n data:', parsedData);
+        
+        // Handle n8n array responses (common pattern)
+        const responseData = Array.isArray(parsedData) ? parsedData[0] : parsedData;
+        
+        // Comprehensive response key checking
+        aiResponse = responseData.output ||           // Chat workflow output
+                    responseData.response ||          // Alternative response key
+                    responseData.message ||           // Standard message key
+                    responseData.text ||              // Text content
+                    responseData.answer ||            // Answer key
+                    responseData.description ||       // Image analysis description
+                    (responseData.objects && `Detected objects: ${responseData.objects.join(', ')}`) || // Objects array
+                    responseData;                     // Fallback to raw data
+        
+        // If response is still an object, stringify it
+        if (typeof aiResponse === 'object') {
+          aiResponse = JSON.stringify(aiResponse, null, 2);
+        }
+        
+        console.log('✅ Final parsed AI response:', aiResponse);
+        
+      } catch (parseError) {
+        console.log('⚠️ JSON parse failed, using raw text:', parseError);
+        aiResponse = responseText;
+      }
+
+      // Validate response content
+      if (!aiResponse || (typeof aiResponse === 'string' && !aiResponse.trim())) {
+        console.warn('⚠️ Empty or invalid AI response, using fallback');
         aiResponse = "I received your message but couldn't generate a response. Please try again.";
+      }
+
+      // Ensure aiResponse is always a string
+      if (typeof aiResponse !== 'string') {
+        aiResponse = String(aiResponse);
       }
 
       const aiMessage: Message = {
@@ -227,19 +240,23 @@ const ChatPage: React.FC = () => {
         created_at: new Date().toISOString(),
       };
 
+      console.log('💬 Adding AI message to chat:', aiMessage);
+      
+      // Parallel UI update and database save
       setMessages(prev => [...prev, aiMessage]);
-      const { error: aiInsertError } = await supabase.from('messages').insert([
-        {
-          id: aiMessage.id,
-          chat_id: aiMessage.chat_id,
-          type: aiMessage.type,
-          content: aiMessage.content,
-          created_at: aiMessage.created_at,
-        }
-      ]);
-      if (aiInsertError) console.error('Error inserting AI message:', aiInsertError);
-    } catch (err) {
-      console.error('Error sending message to chat webhook:', err);
+      
+      await supabase.from('messages').insert([{
+        id: aiMessage.id,
+        chat_id: aiMessage.chat_id,
+        type: aiMessage.type,
+        content: aiMessage.content,
+        created_at: aiMessage.created_at,
+        rating: null
+      }]);
+
+    } catch (error) {
+      console.error('Message send error:', error);
+      
       setMessages(prev => [
         ...prev,
         {
@@ -253,30 +270,35 @@ const ChatPage: React.FC = () => {
     } finally {
       setIsTyping(false);
     }
-  };
-  const handleRateMessage = (messageId: string, rating: 'positive' | 'negative') => {
-    setMessages(prev => prev.map(msg => (msg.id === messageId ? { ...msg, rating } : msg)));
-    supabase.from('messages').update({ rating }).eq('id', messageId).then(({ error }) => {
-      if (error) console.error('Error updating message rating:', error);
-    });
-  };
+  }, [decodedImageId, image, messages]);
 
-  const handleExport = () => {
+  // Memoized objects array
+  const objectsArray = useMemo(() => {
+    return Array.isArray(image?.objects) ? image.objects : [];
+  }, [image?.objects]);
+
+  const handleRateMessage = useCallback((messageId: string, rating: 'positive' | 'negative') => {
+    setMessages(prev => prev.map(msg => 
+      msg.id === messageId ? { ...msg, rating } : msg
+    ));
+    
+    supabase.from('messages')
+      .update({ rating })
+      .eq('id', messageId);
+  }, []);
+
+  const handleExport = useCallback(() => {
+    if (!image) return;
+    
     const exportData = {
       image: {
         filename: image.filename,
         url: image.url,
         uploadedAt: new Date().toISOString(),
         ocr: image.ocr,
-        objects: image.objects,
+        objects: objectsArray,
       },
-      conversation: messages.map(msg => ({
-        id: msg.id,
-        type: msg.type,
-        content: msg.content,
-        timestamp: msg.created_at,
-        rating: msg.rating,
-      })),
+      conversation: messages,
       exportedAt: new Date().toISOString(),
       platform: 'PictureASKQ',
     };
@@ -292,32 +314,35 @@ const ChatPage: React.FC = () => {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  };
+  }, [image, objectsArray, messages]);
 
-  const handleShare = () => {
+  const handleShare = useCallback(() => {
+    if (!imageId) return;
+    
     const shareUrl = `${window.location.origin}/chat/${encodeURIComponent(imageId)}`;
     navigator.clipboard.writeText(shareUrl).then(() => {
       toast({
         title: "Link copied!",
         description: "Conversation link has been copied to your clipboard.",
       });
-    }).catch(err => {
-      console.error('Failed to copy link:', err);
+    }).catch(() => {
       toast({
         title: "Failed to copy",
         description: "Could not copy link to clipboard.",
         variant: "destructive",
       });
     });
-  };
+  }, [imageId, toast]);
 
+  // Loading state
   if (isLoadingImage) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-center">
-          <h2 className="text-2xl font-semibold text-foreground mb-2">Loading image and analysis...</h2>
-          <p className="text-muted-foreground">Please wait while we prepare your chat session.</p>
-        </div>
+        <Card className="p-8 text-center max-w-md">
+          <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4"></div>
+          <h2 className="text-2xl font-semibold text-foreground mb-2">Loading your image...</h2>
+          <p className="text-muted-foreground">Preparing your chat session.</p>
+        </Card>
       </div>
     );
   }
@@ -325,11 +350,13 @@ const ChatPage: React.FC = () => {
   if (!image) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-center">
+        <Card className="p-8 text-center max-w-md">
           <h2 className="text-2xl font-semibold text-destructive mb-2">Image not found</h2>
-          <p className="text-muted-foreground">The image you are looking for could not be loaded or analyzed.</p>
-          <Button onClick={() => navigate('/dashboard')} className="mt-4">Go to Dashboard</Button>
-        </div>
+          <p className="text-muted-foreground">The image you are looking for could not be loaded.</p>
+          <Button onClick={() => navigate('/dashboard')} className="mt-4">
+            Go to Dashboard
+          </Button>
+        </Card>
       </div>
     );
   }
@@ -355,9 +382,6 @@ const ChatPage: React.FC = () => {
           <Button variant="ghost" size="sm" onClick={handleShare}>
             <Share2 className="w-4 h-4 mr-2" />
             Share
-          </Button>
-          <Button variant="ghost" size="sm">
-            <Settings className="w-4 h-4" />
           </Button>
         </div>
       </div>
